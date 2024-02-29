@@ -342,6 +342,7 @@ static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRFhVvwBqx";
 void vAllocate (xMbPollContext * ctx);
 void vPrintReadValues (int iAddr, int iCount, xMbPollContext * ctx);
 void vPrintReadValuesCSV (int iAddr, int iCount, xMbPollContext * ctx);
+void vPrintHeader (int iAddr, int iCount, xMbPollContext * ctx);
 void vPrintConfig (const xMbPollContext * ctx);
 void vPrintCommunicationSetup (const xMbPollContext * ctx);
 void vReportSlaveID (const xMbPollContext * ctx);
@@ -1106,6 +1107,9 @@ vPrintReadValues (int iAddr, int iCount, xMbPollContext * ctx) {
 void
 vPrintReadValuesCSV (int iAddr, int iCount, xMbPollContext * ctx) {
   int i;
+
+  vPrintHeader(iAddr, iCount, ctx);
+  
   for (i = 0; i < iCount; i++) {
 
     //printf ("%d;", iAddr);
@@ -1163,6 +1167,37 @@ vPrintReadValuesCSV (int iAddr, int iCount, xMbPollContext * ctx) {
     putchar (';');
   }
 }
+// -----------------------------------------------------------------------------
+void
+vPrintHeader (int iAddr, int iCount, xMbPollContext * ctx) {
+  int i;
+  static bool header_printed = false;
+  if (header_printed == true) {
+    return;
+  }
+  for (i = 0; i < iCount; i++) {
+
+    printf ("%d", iAddr);
+
+    switch (ctx->eFormat) {
+      case eFormatInt:
+        iAddr += 2;
+        break;
+
+      case eFormatFloat:
+        iAddr += 2;
+        break;
+
+      default: 
+        iAddr++;
+        break;
+    }
+    putchar (';');
+  }
+  putchar ('\n');
+  header_printed = true;
+}
+
 
 // -----------------------------------------------------------------------------
 void
@@ -1358,7 +1393,7 @@ vAllocate (xMbPollContext * ctx) {
 void
 vSigIntHandler (int sig) {
 
-  if ( (ctx.bIsPolling) && (!ctx.bIsWrite)) {
+  if ( (ctx.bIsPolling) && (!ctx.bIsWrite) && (!ctx.bIsCSV)) {
 
     printf ("--- %s poll statistics ---\n"
             "%d frames transmitted, %d received, %d errors, %.1f%% frame loss\n",
@@ -1380,7 +1415,7 @@ vSigIntHandler (int sig) {
   iChipIoClose (xChip);
 // -----------------------------------------------------------------------------
 #endif /* USE_CHIPIO defined */
-  if (sig == SIGINT) {
+  if (sig == SIGINT && !ctx.bIsCSV) {
     printf ("\neverything was closed.\nHave a nice day !\n");
   }
   else {
