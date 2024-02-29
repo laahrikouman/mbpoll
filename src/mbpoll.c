@@ -248,6 +248,7 @@ typedef struct xMbPollContext {
   bool bIsChipIo;
   bool bIsBigEndian;
   bool bIsQuiet;
+  bool bIsCSV;
 #ifdef MBPOLL_GPIO_RTS
   int iRtsPin;
 #endif
@@ -296,6 +297,7 @@ static xMbPollContext ctx = {
   .bIsChipIo = false,
   .bIsBigEndian = false,
   .bIsQuiet = false,
+  .bIsCSV = false,
 #ifdef MBPOLL_GPIO_RTS
   .iRtsPin = -1,
 #endif
@@ -324,14 +326,14 @@ static xChipIoSerial * xChipSerial;
 static const char sChipIoSlaveAddrStr[] = "chipio slave address";
 static const char sChipIoIrqPinStr[] = "chipio irq pin";
 // option -i et -n supplémentaires pour chipio
-static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRhVvwBqi:n:";
+static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRhVvwBqxi:n:";
 
 #else /* USE_CHIPIO == 0 */
 /* constants ================================================================ */
 #ifdef MBPOLL_GPIO_RTS
-static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WR::F::hVvwBq";
+static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WR::F::hVvwBqx";
 #else
-static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRFhVvwBq";
+static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRFhVvwBqx";
 #endif
 // -----------------------------------------------------------------------------
 #endif /* USE_CHIPIO == 0 */
@@ -339,6 +341,7 @@ static const char * short_options = "m:a:r:c:t:1l:o:p:b:d:s:P:u0WRFhVvwBq";
 /* private functions ======================================================== */
 void vAllocate (xMbPollContext * ctx);
 void vPrintReadValues (int iAddr, int iCount, xMbPollContext * ctx);
+void vPrintReadValuesCSV (int iAddr, int iCount, xMbPollContext * ctx);
 void vPrintConfig (const xMbPollContext * ctx);
 void vPrintCommunicationSetup (const xMbPollContext * ctx);
 void vReportSlaveID (const xMbPollContext * ctx);
@@ -544,7 +547,11 @@ main (int argc, char **argv) {
       case 'q':
         ctx.bIsQuiet = true;
         break;
-
+        
+      case 'x':
+        ctx.bIsQuiet = true;
+        ctx.bIsCSV = true;
+        break;
         // TCP -----------------------------------------------------------------
       case 'p':
         ctx.sTcpPort = optarg;
@@ -948,21 +955,24 @@ main (int argc, char **argv) {
       }
       else {
         int i;
-
+        
         // Lecture -------------------------------------------------------------
         for (i = 0; i < ctx.iSlaveCount; i++) {
 
           modbus_set_slave (ctx.xBus, ctx.piSlaveAddr[i]);
           ctx.iTxCount++;
-
-          printf ("-- Polling slave %d...", ctx.piSlaveAddr[i]);
-          if (ctx.bIsPolling) {
-
-            printf (" Ctrl-C to stop)\n");
-          }
-          else {
-
+          
+          if (ctx.bIsCSV) {
             putchar ('\n');
+          } else {
+            printf ("-- Polling slave %d...", ctx.piSlaveAddr[i]);
+            if (ctx.bIsPolling) {
+
+              printf (" Ctrl-C to stop)\n");
+            }
+            else {
+              putchar ('\n');
+            }
           }
 
           int j;
@@ -998,7 +1008,12 @@ main (int argc, char **argv) {
             if (iRet == iNbReg) {
 
               ctx.iRxCount++;
-              vPrintReadValues (ctx.piStartRef[j], ctx.iCount, &ctx);
+              
+              if (ctx.bIsCSV) {
+                vPrintReadValuesCSV (ctx.piStartRef[j], ctx.iCount, &ctx);
+              } else {
+                vPrintReadValues (ctx.piStartRef[j], ctx.iCount, &ctx);
+              }
             }
             else {
               ctx.iErrorCount++;
@@ -1084,6 +1099,68 @@ vPrintReadValues (int iAddr, int iCount, xMbPollContext * ctx) {
         break;
     }
     putchar ('\n');
+  }
+}
+
+// -----------------------------------------------------------------------------
+void
+vPrintReadValuesCSV (int iAddr, int iCount, xMbPollContext * ctx) {
+  int i;
+  for (i = 0; i < iCount; i++) {
+
+    //printf ("%d;", iAddr);
+
+    switch (ctx->eFormat) {
+
+      case eFormatBin:
+        printf ("%c", (DUINT8 (ctx->pvData, i) != FALSE) ? '1' : '0');
+        iAddr++;
+        break;
+
+      case eFormatDec: {
+        uint16_t v = DUINT16 (ctx->pvData, i);
+        if (v & 0x8000) {
+
+          printf ("%u (%d)", v, (int) (int16_t) v);
+        }
+        else {
+
+          printf ("%u", v);
+        }
+        iAddr++;
+
+      }
+      break;
+
+      case eFormatInt16:
+        printf ("%d", (int) (int16_t) (DUINT16 (ctx->pvData, i)));
+        iAddr++;
+        break;
+
+      case eFormatHex:
+        printf ("0x%04X", DUINT16 (ctx->pvData, i));
+        iAddr++;
+        break;
+
+      case eFormatString:
+        printf ("%c%c", (char) ((int) (DUINT16 (ctx->pvData, i) / 256)), (char) (DUINT16 (ctx->pvData, i) % 256));
+        iAddr++;
+        break;
+
+      case eFormatInt:
+        printf ("%d", lSwapLong (DINT32 (ctx->pvData, i)));
+        iAddr += 2;
+        break;
+
+      case eFormatFloat:
+        printf ("%g", fSwapFloat (DFLOAT (ctx->pvData, i)));
+        iAddr += 2;
+        break;
+
+      default:  // Impossible normalement
+        break;
+    }
+    putchar (';');
   }
 }
 
@@ -1421,6 +1498,7 @@ vUsage (FILE * stream, int exit_msg) {
            "                for reading, it is possible to give a reference list\n"
            "                separated by commas or colons\n"
            "  -c #          Number of values to read (%d-%d, %d is default)\n"
+           "  -x            Print the results separated by ; without reg numbers (basically CSV)\n"
            "  -u            Read the description of the type, the current status, and other\n"
            "                information specific to a remote device (RTU only)\n"
            "  -t 0          Discrete output (coil) data type (binary 0 or 1)\n"
